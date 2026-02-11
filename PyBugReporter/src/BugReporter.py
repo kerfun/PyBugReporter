@@ -28,11 +28,12 @@ class BugHandler:
     orgName: str = ''
     test: bool = False
     projectName: str = ''
+    issueLabels: list = []
     useDiscord: bool = False
     botToken: str = ''
     channelId: str | int = ''
 
-    def __init__(self, githubKey: str, repoName: str, orgName: str, test: bool, projectName="", useDiscord: bool = False, botToken: str = "", channelId: str | int = "") -> None:
+    def __init__(self, githubKey: str, repoName: str, orgName: str, test: bool, projectName:str = "", issueLabels: list = [], useDiscord: bool = False, botToken: str = "", channelId: str | int = "") -> None:
         """Saves the given information in the BugHandler object.
 
         Args:
@@ -41,6 +42,7 @@ class BugHandler:
             orgName (str): the organization of the repo
             test (bool): whether or not bugs in this code should actually be reported
             projectName(str): Name of github project to add bugs to
+            issueLabels(list): List of labels to add to github bugs
             useDiscord (bool): whether to send the bug report to Discord
             botToken (str): the token for the Discord bot
             channelId (str | int): the ID of the Discord channel to send messages to
@@ -49,6 +51,8 @@ class BugHandler:
         self.repoName = repoName
         self.orgName = orgName
         self.test = test
+        self.projectName = projectName
+        self.issueLabels = issueLabels
         self.useDiscord = useDiscord
 
         if useDiscord:
@@ -79,7 +83,7 @@ class BugReporter:
         self.kwargs = kwargs
 
     @classmethod
-    def setVars(cls, githubKey: str, repoName: str, orgName: str, test: bool, projectName="", useDiscord: bool = False, botToken: str = "", channelId: str = "") -> None:
+    def setVars(cls, githubKey: str, repoName: str, orgName: str, test: bool, projectName: str = "", issueLabels: list = [], useDiscord: bool = False, botToken: str = "", channelId: str = "") -> None:
         """Sets the necessary variables to make bug reports.
 
         Args:
@@ -93,7 +97,7 @@ class BugReporter:
             botToken (str): the token for the Discord bot
             channelId (str | int): the ID of the Discord channel to send messages to
         """
-        cls.handlers[repoName] = BugHandler(githubKey, repoName, orgName, test, projectName, useDiscord, botToken, channelId)
+        cls.handlers[repoName] = BugHandler(githubKey, repoName, orgName, test, projectName, issueLabels, useDiscord, botToken, channelId)
 
     def __call__(self, func: callable) -> None:
         """Decorator that catches exceptions and sends a bug report to the github repository.
@@ -183,8 +187,6 @@ class BugReporter:
 
         # query variables
         repoId = await self._getRepoId_async(self.handlers[repoName])
-        bugLabel = "LA_kwDOJ3JPj88AAAABU1q15w"
-        autoLabel = "LA_kwDOJ3JPj88AAAABU1q2DA"
         
         # Create new issue
         createIssue = """
@@ -207,12 +209,15 @@ class BugReporter:
             }
         """
 
+        # Get label IDs from label names
+        labelIds = await self._getLabelIds_async(self.handlers[repoName])
+
         variables = {
             "input": {
                 "repositoryId": repoId,
                 "title": errorTitle,
                 "body": errorMessage,
-                "labelIds": [bugLabel, autoLabel]
+                "labelIds": labelIds
             }
         }
 
@@ -287,6 +292,7 @@ class BugReporter:
                 return project["id"]
 
         raise ValueError(f"Project '{projectName}' not found in repository '{repoName}'.")
+    
 
     async def _checkIfIssueExists_async(self, handler: BugHandler, errorTitle: str) -> bool:
         """Checks if an issue already exists in the repository.
@@ -371,6 +377,52 @@ class BugReporter:
         repoID = await client.execute_async(query=getID, variables=variables, headers=headers)
         return repoID['data']['repository']['id']
 
+    async def _getLabelIds_async(self, handler: BugHandler) -> list[str]:
+        """Gets the label IDs for the handler's issue labels.
+
+        Args:
+            handler (BugHandler): the object of reporting details
+
+        Returns:
+            list[str]: list of label IDs
+        """
+        if not handler.issueLabels:
+            return []
+            
+        client = GraphqlClient(endpoint="https://api.github.com/graphql")
+        headers = {"Authorization": f"Bearer {handler.githubKey}"}
+
+        # query to get labels by names
+        getLabels = """
+            query getLabels($owner: String!, $name: String!, $first: Int!) {
+                repository(owner: $owner, name: $name) {
+                    labels(first: $first) {
+                        nodes {
+                            id
+                            name
+                        }
+                    }
+                }
+            }
+        """
+
+        variables = {
+            "owner": handler.orgName,
+            "name": handler.repoName,
+            "first": 100
+        }
+
+        result = await client.execute_async(query=getLabels, variables=variables, headers=headers)
+        labels = result['data']['repository']['labels']['nodes']
+
+        # Create list of label IDs for matching names
+        labelIds = []
+        for label in labels:
+            if label['name'] in handler.issueLabels:
+                labelIds.append(label['id'])
+
+        return labelIds
+
     @classmethod
     def manualBugReport(cls, repoName: str, errorTitle: str, errorMessage: str) -> None:
         """Manually sends a bug report to the Github repository.
@@ -402,8 +454,6 @@ class BugReporter:
 
         # query variables
         repoId = await cls._getRepoId_async(cls, handler)
-        bugLabel = "LA_kwDOJ3JPj88AAAABU1q15w"
-        autoLabel = "LA_kwDOJ3JPj88AAAABU1q2DA"
         
         # Create new issue
         createIssue = """
@@ -424,13 +474,14 @@ class BugReporter:
                 }
             }
         """
+        labelIds = await cls._getLabelIds_async(cls, cls.handlers[repoName])
 
         variables = {
             "input": {
                 "repositoryId": repoId,
                 "title": errorTitle,
                 "body": errorMessage,
-                "labelIds": [bugLabel, autoLabel]
+                "labelIds": labelIds
             }
         }
 
