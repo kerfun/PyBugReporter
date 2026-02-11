@@ -12,3 +12,5 @@ src/pip-delete-this-directory.txt
 pbrVenv
 src/lib
 .env
+
+PyBugReporter.egg-info/
