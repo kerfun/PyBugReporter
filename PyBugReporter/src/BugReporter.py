@@ -443,6 +443,12 @@ class BugReporter:
 
         if (issueExists == False):
             result = await client.execute_async(query=createIssue, variables=variables, headers=headers)
+            if 'errors' in result.keys():
+                print('We encountered the following errors adding the issue:')
+                for error in result['errors']:
+                    print(error)
+                    
+                raise RuntimeError("Couldn't add Issue to Github")
             print(f'\nThis error has been reported to the {repoName} repo.\n')
         else:
             print('\nOur team is already aware of this issue.\n')
