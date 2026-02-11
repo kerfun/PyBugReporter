@@ -19,6 +19,7 @@ class BugHandler:
         repoName (str): the name of the repository
         orgName (str): the name of the organization
         test (bool): whether to run in testing mode
+        projectName(str): Name of github project to add bugs to
         extraInfo (bool): whether to include extra information in the bug report
         kwargs: extra info for the bug report
     """
@@ -26,11 +27,12 @@ class BugHandler:
     repoName: str = ''
     orgName: str = ''
     test: bool = False
+    projectName: str = ''
     useDiscord: bool = False
     botToken: str = ''
     channelId: str | int = ''
 
-    def __init__(self, githubKey: str, repoName: str, orgName: str, test: bool, useDiscord: bool = False, botToken: str = "", channelId: str | int = "") -> None:
+    def __init__(self, githubKey: str, repoName: str, orgName: str, test: bool, projectName="", useDiscord: bool = False, botToken: str = "", channelId: str | int = "") -> None:
         """Saves the given information in the BugHandler object.
 
         Args:
@@ -38,6 +40,7 @@ class BugHandler:
             repoName (str): the name of the repo to report to
             orgName (str): the organization of the repo
             test (bool): whether or not bugs in this code should actually be reported
+            projectName(str): Name of github project to add bugs to
             useDiscord (bool): whether to send the bug report to Discord
             botToken (str): the token for the Discord bot
             channelId (str | int): the ID of the Discord channel to send messages to
@@ -76,16 +79,21 @@ class BugReporter:
         self.kwargs = kwargs
 
     @classmethod
-    def setVars(cls, githubKey: str, repoName: str, orgName: str, test: bool, useDiscord: bool = False, botToken: str = "", channelId: str = "") -> None:
+    def setVars(cls, githubKey: str, repoName: str, orgName: str, test: bool, projectName="", useDiscord: bool = False, botToken: str = "", channelId: str = "") -> None:
         """Sets the necessary variables to make bug reports.
 
         Args:
-            githubKey (str): the key used to make bug reports to our github
+            githubKey (str): the key used to make bug reports to the github repo
             repoName (str): the name of the repository
             orgName (str): the name of the organization
             test (bool): whether to run in testing mode
+            projectName(str): Name of github project to add bugs to
+            useDiscord: whether to send bugs to discord
+            useDiscord (bool): whether to send the bug report to Discord
+            botToken (str): the token for the Discord bot
+            channelId (str | int): the ID of the Discord channel to send messages to
         """
-        cls.handlers[repoName] = BugHandler(githubKey, repoName, orgName, test, useDiscord, botToken, channelId)
+        cls.handlers[repoName] = BugHandler(githubKey, repoName, orgName, test, projectName, useDiscord, botToken, channelId)
 
     def __call__(self, func: callable) -> None:
         """Decorator that catches exceptions and sends a bug report to the github repository.
@@ -217,31 +225,32 @@ class BugReporter:
 
         if (not issueExists):
             result = await client.execute_async(query=createIssue, variables=variables, headers=headers)
-            print('\nThis error has been reported to the Tree Growth team.\n')
 
-            issueId = result['data']['createIssue']['issue']['id']  # Extract the issue ID
+            if self.handlers[repoName].projectName:
+                issueId = result['data']['createIssue']['issue']['id']  # Extract the issue ID
 
-            # Mutation to add issue to a project
-            addToProject = """
-                mutation addToProject($projectId: ID!, $contentId: ID!) {
-                    addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
-                        item {
-                            id
+                # Mutation to add issue to a project
+                addToProject = """
+                    mutation addToProject($projectId: ID!, $contentId: ID!) {
+                        addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                            item {
+                                id
+                            }
                         }
                     }
-                }
-            """
-            
-            # Replace with your actual project ID
-            projectId = await self.getProjectId_async(repoName, "Tree Growth Projects")
+                """
+                
+                # Replace with your actual project ID
+                projectId = await self.getProjectId_async(repoName, self.handlers[repoName].projectName)
 
-            variables = {
-                "projectId": projectId,
-                "contentId": issueId
-            }
+                variables = {
+                    "projectId": projectId,
+                    "contentId": issueId
+                }
             
             # Execute the mutation to add the issue to the project
             await client.execute_async(query=addToProject, variables=variables, headers=headers)
+            print(f'\nThis error has been reported to the {repoName} repo.\n')
         else:
             print('\nOur team is already aware of this issue.\n')
 
@@ -434,6 +443,6 @@ class BugReporter:
 
         if (issueExists == False):
             result = await client.execute_async(query=createIssue, variables=variables, headers=headers)
-            print('\nThis error has been reported to the Tree Growth team.\n')
+            print(f'\nThis error has been reported to the {repoName} repo.\n')
         else:
             print('\nOur team is already aware of this issue.\n')
